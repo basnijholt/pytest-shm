@@ -1,0 +1,111 @@
+[project]
+name = "pytest-shm"
+dynamic = ["version"]
+description = "Put pytest's temporary files on the /dev/shm tmpfs so fsync-heavy suites stop waiting on the disk"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Bas Nijholt", email = "bas@nijho.lt" }
+]
+maintainers = [
+    { name = "Bas Nijholt", email = "bas@nijho.lt" }
+]
+requires-python = ">=3.10"
+keywords = [
+    "pytest",
+    "tmpfs",
+    "shm",
+    "fsync",
+    "tempfile",
+    "xdist",
+    "testing",
+    "performance",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pytest>=7",
+]
+
+[project.urls]
+Homepage = "https://github.com/basnijholt/pytest-shm"
+Repository = "https://github.com/basnijholt/pytest-shm"
+Documentation = "https://github.com/basnijholt/pytest-shm#readme"
+Issues = "https://github.com/basnijholt/pytest-shm/issues"
+Changelog = "https://github.com/basnijholt/pytest-shm/releases"
+
+[project.entry-points.pytest11]
+shm = "pytest_shm.plugin"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/pytest_shm/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pytest_shm"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D203",    # incompatible with D211
+    "D213",    # incompatible with D212
+    "E501",    # formatter handles line length
+    "COM812",  # avoid formatter conflicts
+    "ISC001",  # avoid formatter conflicts
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S108", "PLR2004"]  # relaxed for tests
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+
+[[tool.mypy.overrides]]
+module = "pytest_shm._version"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.src]
+exclude = [
+    "src/pytest_shm/_version.py",  # Generated at build time
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.0",
+    "pre-commit>=4.5.0",
+    "pytest>=9.0.2",
+    "pytest-xdist>=3.8.0",
+    "ruff>=0.16.0",
+    "ty>=0.0.1a13",
+]
