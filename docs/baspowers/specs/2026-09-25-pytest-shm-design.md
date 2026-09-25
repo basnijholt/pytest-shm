@@ -50,7 +50,8 @@ Deleting per test is not offered: pytest then reuses freed numbered names, and c
 
 ### Configuration
 
-One ini option, `shm_min_free_gib` (float, default `1`), set in `pytest.ini`/`pyproject.toml` or with `-o shm_min_free_gib=4`.
+One ini option, `shm_min_free_gib` (pytest's `float` ini type, default `1.0`), set in `pytest.ini`/`pyproject.toml` or with `-o shm_min_free_gib=4`.
+The `float` type (pytest 8.4+) accepts both ini strings and pytest 9's native `[tool.pytest]` TOML numbers, which a `string` option rejects.
 The default rejects Docker's 64 MiB `/dev/shm`; suites with a larger peak raise it.
 
 ### Report header
@@ -69,7 +70,7 @@ The default rejects Docker's 64 MiB `/dev/shm`; suites with a larger peak raise 
 - `src/pytest_shm/plugin.py`: all hooks, the fixture, and `unavailable_reason(min_free_gib) -> str | None`.
 - `src/pytest_shm/py.typed`.
 - Entry point `[project.entry-points.pytest11] shm = "pytest_shm.plugin"`.
-- Dependencies: `pytest>=7`; Python `>=3.10`.
+- Dependencies: `pytest>=8.4`; Python `>=3.10`.
 
 ## Testing
 
@@ -84,7 +85,8 @@ Cases:
 - An explicit `--basetemp` survives a passing run, with and without xdist.
 - With xdist `--dist each -n 2` and a test failing only on `gw1`, `popen-gw0` is removed and `popen-gw1` is kept.
 - An exported `TMPDIR` wins, and the header says why the plugin is off.
-- `-o shm_min_free_gib=1e9` leaves the temp root alone and reports the free space.
+- `-o shm_min_free_gib=1e9`, or the same threshold as a native `[tool.pytest]` TOML number, leaves the temp root alone and reports the free space.
+- The plugin loads with `-p no:xdist`.
 - `-p no:shm` leaves the temp root alone.
 - An in-process run restores `TMPDIR` and `tempfile.tempdir`.
 - `unavailable_reason` refuses a `noexec` mount (unit test with a patched `os.statvfs`).

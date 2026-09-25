@@ -47,14 +47,15 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addini(
         _MIN_FREE_INI,
         f"Minimum free GiB {SHM} needs before temporary files move there (default: 1).",
-        default="1",
+        type="float",
+        default=1.0,
     )
 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_load_initial_conftests(early_config: pytest.Config) -> None:
     """Point the temp root at `/dev/shm` before any `conftest.py` can read it."""
-    reason = off_reason(float(early_config.getini(_MIN_FREE_INI)), os.environ)
+    reason = off_reason(early_config.getini(_MIN_FREE_INI), os.environ)
     if reason is not None:
         early_config.stash[_OFF_REASON] = reason
         return

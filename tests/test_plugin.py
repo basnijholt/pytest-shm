@@ -100,6 +100,20 @@ def test_too_little_free_space_leaves_the_temp_root_alone(
 
 
 @needs_shm
+@pytest.mark.skipif(
+    int(pytest.__version__.partition(".")[0]) < 9, reason="native [tool.pytest] needs pytest 9"
+)
+def test_threshold_accepts_a_native_toml_number(pytester: pytest.Pytester, temproot: Path) -> None:
+    pytester.makepyprojecttoml("[tool.pytest]\nshm_min_free_gib = 1e9\n")
+    pytester.makepyfile(_TEMP_ROOT_IS_NOT_SHM)
+    result = run_pytest(pytester)
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(
+        ["shm: off, /dev/shm has * GiB free, below shm_min_free_gib = 1e+09"]
+    )
+
+
+@needs_shm
 def test_disabled_plugin_leaves_the_temp_root_alone(
     pytester: pytest.Pytester, temproot: Path
 ) -> None:
