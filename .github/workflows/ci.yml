@@ -47,7 +47,7 @@ jobs:
           uv pip install --python .venv "pytest==8.4.0"
 
       - name: Run tests
-        run: uv run --no-sync pytest -n auto -v
+        run: uv run --no-sync --python 3.10 pytest -n auto -v
 
   lint:
     runs-on: ubuntu-latest
