@@ -24,6 +24,11 @@ _OWNS_BASETEMP_KEY = "shm_owns_basetemp"
 _OFF_REASON = pytest.StashKey[str]()
 _CONTAINED = pytest.StashKey[bool]()
 _OWNED_BASETEMP = pytest.StashKey[Path]()
+_NOTHING_TO_INSPECT = (
+    pytest.ExitCode.OK,
+    pytest.ExitCode.NO_TESTS_COLLECTED,
+    pytest.ExitCode.USAGE_ERROR,
+)
 
 
 def off_reason(
@@ -137,7 +142,8 @@ def pytest_sessionstart(session: pytest.Session) -> Generator[None]:
     This runs after every other `pytest_sessionstart`, once xdist has started its
     workers, so they inherit `/dev/shm` itself rather than this process's directory.
     Workers never switch the temp root, so this checks where it is rather than
-    whether this process moved it.
+    whether this process moved it. A worker xdist starts later to replace a crashed
+    one inherits the controller's directory instead, and its files are freed with it.
     """
     yield
     config = session.config
@@ -146,7 +152,10 @@ def pytest_sessionstart(session: pytest.Session) -> Generator[None]:
     if factory is None or Path(tempfile.gettempdir()) != SHM:
         return
     basetemp = factory.getbasetemp()
-    if _pytest_chose_basetemp(config) and basetemp.is_relative_to(SHM.resolve()):
+    if not basetemp.is_relative_to(SHM.resolve()):
+        # Containing would move files the caller sent to /dev/shm onto disk.
+        return
+    if _pytest_chose_basetemp(config):
         config.stash[_OWNED_BASETEMP] = basetemp
     contained = basetemp / _CONTAINED_NAME
     contained.mkdir()
@@ -157,18 +166,19 @@ def pytest_sessionstart(session: pytest.Session) -> Generator[None]:
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
-    """Hand back `/dev/shm`, and free a passing session's base directory from memory.
+    """Hand back `/dev/shm`, and free the base directory of a session nobody needs to inspect.
 
     pytest keeps the last three sessions' directories, which on tmpfs pins memory
-    until they are pruned. Each xdist worker owns its own base directory, so a
-    failing session keeps only the workers that saw a failure. Deleting per test is
-    not an option: pytest then reuses the freed names, and caches keyed by path hand
-    the next test the previous one's state.
+    until they are pruned. A session that passed, collected no tests, or stopped at a
+    usage error leaves nothing worth keeping. Each xdist worker owns its own base
+    directory, so a failing session keeps only the workers that saw a failure.
+    Deleting per test is not an option: pytest then reuses the freed names, and
+    caches keyed by path hand the next test the previous one's state.
     """
     config = session.config
     if config.stash.get(_CONTAINED, False):
         os.environ["TMPDIR"] = str(SHM)
         tempfile.tempdir = None
     basetemp = config.stash.get(_OWNED_BASETEMP, None)
-    if basetemp is not None and exitstatus == 0:
+    if basetemp is not None and exitstatus in _NOTHING_TO_INSPECT:
         shutil.rmtree(basetemp, ignore_errors=True)

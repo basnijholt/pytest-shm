@@ -304,15 +304,72 @@ def test_explicit_basetemp_survives_a_passing_session(
 
 
 @needs_shm
-def test_base_directory_outside_shm_survives_a_passing_session(
+def test_exported_shm_temp_root_with_base_directory_on_disk_is_left_alone(
     pytester: pytest.Pytester, temproot: Path, disk_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # An exported TMPDIR=/dev/shm still gets containment, wherever the base directory is.
+    # Containing would move files the caller sent to /dev/shm onto disk.
     monkeypatch.setenv("TMPDIR", str(SHM))
     monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(disk_dir))
-    pytester.makepyfile("def test_write(tmp_path):\n    (tmp_path / 'kept').write_text('x')\n")
+    pytester.makepyfile(
+        """
+        import tempfile
+
+        def test_write(tmp_path):
+            assert tempfile.gettempdir() == "/dev/shm"
+            (tmp_path / "kept").write_text("x")
+        """
+    )
     run_pytest(pytester).assert_outcomes(passed=1)
     assert list(disk_dir.glob("pytest-of-*/pytest-[0-9]*/test_write0/kept"))
+
+
+@needs_shm
+def test_exported_shm_temp_root_without_tmpdir_plugin_still_runs(
+    pytester: pytest.Pytester, temproot: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TMPDIR", str(SHM))
+    pytester.makepyfile("def test_pass():\n    pass\n")
+    run_pytest(pytester, "-p", "no:tmpdir").assert_outcomes(passed=1)
+
+
+@needs_shm
+@pytest.mark.parametrize(
+    ("args", "exit_code"),
+    [(("-k", "no_such_test"), 5), (("no_such_path.py",), 4)],
+    ids=["no-tests-collected", "usage-error"],
+)
+def test_session_that_runs_no_tests_leaves_nothing_behind(
+    pytester: pytest.Pytester, temproot: Path, args: tuple[str, ...], exit_code: int
+) -> None:
+    pytester.makepyfile("def test_pass():\n    pass\n")
+    assert run_pytest(pytester, *args).ret == exit_code
+    assert list(temproot.glob("pytest-of-*/pytest-[0-9]*")) == []
+
+
+@needs_shm
+def test_base_directory_is_freed_after_session_fixtures_finish_with_it(
+    pytester: pytest.Pytester, temproot: Path
+) -> None:
+    # pytest.exit skips the last test's teardown, so pytest tears session fixtures down
+    # in pytest_sessionfinish, which must run before the base directory disappears.
+    pytester.makepyfile(
+        """
+        import pytest
+
+        @pytest.fixture(scope="session")
+        def state(tmp_path_factory):
+            path = tmp_path_factory.mktemp("state")
+            yield path
+            (path / "closed").write_text("x")
+
+        def test_stop(state):
+            pytest.exit("done", returncode=0)
+        """
+    )
+    result = run_pytest(pytester)
+    assert result.ret == 0, result.stdout.str()
+    result.stdout.no_fnmatch_line("*Error*")
+    assert list(temproot.glob("pytest-of-*/pytest-[0-9]*")) == []
 
 
 @needs_shm

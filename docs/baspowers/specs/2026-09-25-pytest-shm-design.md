@@ -39,15 +39,16 @@ Disabling:
 ### Containment
 
 A `pytest_sessionstart` new-style wrapper acts after every other `pytest_sessionstart` implementation, so xdist's controller has already started its workers and they inherit `/dev/shm` itself.
-It acts whenever `tempfile.gettempdir()` is `/dev/shm`, whether this process switched it or inherited it (xdist workers inherit the controller's environment, and a user may export `TMPDIR=/dev/shm`), and pytest's `tmpdir` plugin has set `config._tmp_path_factory`.
+It acts whenever `tempfile.gettempdir()` is `/dev/shm`, whether this process switched it or inherited it (xdist workers inherit the controller's environment, and a user may export `TMPDIR=/dev/shm`), pytest's `tmpdir` plugin has set `config._tmp_path_factory`, and the base directory resolves under `/dev/shm`, since containing would otherwise move files the caller sent to `/dev/shm` onto disk.
+A worker xdist starts to replace a crashed one inherits the controller's contained directory, so its files are freed with the controller's base directory rather than on their own.
 It creates `<basetemp>/shm-tmp` and points `TMPDIR` and `tempfile.tempdir` at it, so bare `tempfile` output from collection on lives and dies with pytest's base directory instead of holding memory until reboot.
 `pytest_sessionfinish` points them back at `/dev/shm`.
-Temporary files created during conftest import or `pytest_configure` are not contained; the README says so.
+Temporary files created before the session starts (initial conftest import, `pytest_configure`, other `pytest_sessionstart` hooks) or after it ends (`pytest_terminal_summary`, `pytest_unconfigure`) are not contained; the README says so.
 
 ### Cleanup
 
-Containment stashes the base directory when pytest chose it (no caller `--basetemp`) and it lies under `/dev/shm`.
-`pytest_sessionfinish` (`trylast=True`, after the runner has torn down session fixtures) removes the stashed directory when the session's exit status is 0.
+Containment stashes the base directory when pytest chose it (no caller `--basetemp`).
+`pytest_sessionfinish` (`trylast=True`, after the runner has torn down session fixtures) removes the stashed directory when the session passed, collected no tests, or stopped at a usage error, since none of those leaves anything to inspect.
 Under xdist each worker owns `<controller basetemp>/popen-gwN`, so a failing run keeps only the directories of workers that saw a failure plus the controller's empty `shm-tmp`; a passing run removes the controller's directory too.
 Every xdist worker receives `--basetemp`, so the controller tells each worker through `node.workerinput["shm_owns_basetemp"]` whether the caller chose one, in `pytest_configure_node` (`optionalhook=True`, so the plugin loads without xdist).
 A worker without the key treats its base directory as the caller's.
@@ -66,7 +67,7 @@ The default rejects Docker's 64 MiB `/dev/shm`; suites with a larger peak raise 
 
 ## Known consequences (documented in README)
 
-- Temporary files created during conftest import or `pytest_configure` land directly in `/dev/shm`.
+- Temporary files created before the session starts or after it ends land directly in `/dev/shm`.
 - Libraries that cache under the temp root lose their cache at containment; pin their cache directory at import time (for example `TIKTOKEN_CACHE_DIR`) in a `conftest.py`, where `tempfile.gettempdir()` is still `/dev/shm`.
 - Temp files live on another filesystem than the project, so renames into it fail with `EXDEV`.
 - Temp paths are longer than `/tmp/tmpXXXX` (`/dev/shm/pytest-of-<user>/pytest-N/popen-gwN/shm-tmp/...`), which matters for the 107-byte `AF_UNIX` socket path limit.
@@ -91,8 +92,10 @@ Cases:
 
 - A conftest sees `/dev/shm` at import time, and with no `PYTEST_DEBUG_TEMPROOT` pytest derives its base directory from the switched temp root.
 - Module-level and in-test `tempfile.mkdtemp()` output lands in `<basetemp>/shm-tmp`.
-- A passing run leaves no `pytest-N` directory; a failing run keeps it, including contained `tempfile` output.
-- An explicit `--basetemp` survives a passing run, with and without xdist, and so does a pytest-owned base directory outside `/dev/shm`.
+- A passing run, a run that collects no tests, and a usage error leave no `pytest-N` directory; a failing run keeps it, including contained `tempfile` output.
+- The base directory outlives session fixtures torn down in `pytest_sessionfinish` after `pytest.exit(returncode=0)`.
+- An explicit `--basetemp` survives a passing run, with and without xdist.
+- An exported `TMPDIR=/dev/shm` with the base directory on disk is left uncontained, and with `-p no:tmpdir` the session still runs.
 - With xdist, a passing run leaves nothing, and with `--dist each -n 2` and a test failing only on `gw1`, only `popen-gw1` and the controller's `shm-tmp` remain.
 - An exported `TMPDIR`, a `--basetemp` or `PYTEST_DEBUG_TEMPROOT` outside `/dev/shm`, `-p no:tmpdir`, `-p no:shm`, and a too-high threshold (via `-o` or a native `[tool.pytest]` number) each leave the temp root alone, and the header says why.
 - In-process sessions restore the caller's `TMPDIR` and `tempfile.tempdir`, including after a usage error, and hand back an exported `TMPDIR=/dev/shm`.

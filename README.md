@@ -56,7 +56,7 @@ shm: off, TMPDIR is exported
 
 1. **Temp root.** Before any `conftest.py` is imported, the plugin sets `TMPDIR=/dev/shm`, so `tmp_path`, `tmp_path_factory`, and every `tempfile` call land in memory.
 2. **Containment.** Tests and the code they drive often call `tempfile.mkdtemp()` without removing the result. On disk that clutters `/tmp`; on tmpfs it would hold memory until reboot. When the session starts, before collection, the plugin points `TMPDIR` at `<basetemp>/shm-tmp`, so that output lives and dies with pytest's own base directory.
-3. **Cleanup.** pytest keeps the last three sessions' base directories. When a session passes, the plugin deletes its base directory right away instead of holding it in memory. A failing session keeps everything for inspection.
+3. **Cleanup.** pytest keeps the last three sessions' base directories. When a session passes, collects no tests, or stops at a usage error, the plugin deletes its base directory right away instead of holding it in memory. A failing session keeps everything for inspection.
 4. **pytest-xdist.** Each worker owns `<basetemp>/popen-gwN` and cleans up after itself, so a failing run keeps only the directories of workers that saw a failure. A `--basetemp` you pass yourself is never deleted, with or without xdist.
 
 Deleting per test is deliberately not offered: pytest would then reuse the freed directory names, and caches keyed by path would hand the next test the previous one's state.
@@ -78,7 +78,7 @@ The plugin leaves the temp root alone, and says why in the report header, when a
 To turn it off explicitly, export `TMPDIR` to the directory you want, or pass `-o shm_min_free_gib=inf`.
 `-p no:shm` works too, but pytest then warns about the unknown `shm_min_free_gib` option if you configured it, and `--strict-config` makes that an error.
 
-If you export `TMPDIR=/dev/shm` yourself, the plugin still contains and cleans up temporary files.
+If you export `TMPDIR=/dev/shm` yourself, the plugin still contains and cleans up temporary files, as long as pytest's base directory is on `/dev/shm` too.
 
 ## Configuration
 
@@ -95,7 +95,7 @@ Override it for one run with `-o shm_min_free_gib=8`.
 
 ## Caveats
 
-- **Only output from session start on is contained.** Temporary files created while `conftest.py` files are imported or in `pytest_configure` land directly in `/dev/shm` and stay there until reboot. Create them in fixtures, or remove them yourself.
+- **Only output during the session is contained.** Temporary files created before the session starts (while the initial `conftest.py` files are imported, in `pytest_configure`, or in other plugins' `pytest_sessionstart` hooks) or after it ends (`pytest_terminal_summary`, `pytest_unconfigure`) land directly in `/dev/shm` and stay there until reboot. Create them in fixtures, or remove them yourself.
 - **Caches under the temp root become per-session.** Libraries that cache downloads under `tempfile.gettempdir()` see the contained directory, which the plugin frees after the session. Pin such caches in your root `conftest.py`, where `tempfile.gettempdir()` is still `/dev/shm`. For tiktoken:
 
   ```python
