@@ -17,6 +17,15 @@ A pytest plugin that puts your test suite's temporary files on the `/dev/shm` tm
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
+- [Why](#why)
+- [Installation](#installation)
+- [How it works](#how-it-works)
+- [When it stays off](#when-it-stays-off)
+- [Configuration](#configuration)
+- [Caveats](#caveats)
+- [Development](#development)
+- [License](#license)
+
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ## Why
