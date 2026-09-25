@@ -5,6 +5,8 @@
 [![License](https://img.shields.io/github/license/basnijholt/pytest-shm)](LICENSE)
 [![CI](https://github.com/basnijholt/pytest-shm/actions/workflows/ci.yml/badge.svg)](https://github.com/basnijholt/pytest-shm/actions/workflows/ci.yml)
 
+<img src="https://raw.githubusercontent.com/basnijholt/pytest-shm/main/docs/logo.svg" alt="pytest-shm logo" align="right" width="200" />
+
 A pytest plugin that puts your test suite's temporary files on the `/dev/shm` tmpfs, so tests that fsync stop waiting on the disk.
 
 > [!NOTE]
@@ -34,7 +36,9 @@ SQLite commits, atomic file replacement, and anything else that promises durabil
 A suite that exercises durable storage can spend most of its time there.
 tmpfs lives in memory, so `fsync` returns immediately.
 
-In [MindRoom](https://github.com/mindroom-ai/mindroom)'s suite of about 26,000 tests, summed test time on a 32-worker NVMe machine fell from 5236 s to 1426 s, and the GitHub Actions test step fell from about 16 to 12-15 minutes.
+How much that saves depends on how much of your suite waits on `fsync`.
+As one data point, in [MindRoom](https://github.com/mindroom-ai/mindroom)'s suite of about 26,000 tests, which commit SQLite transactions and atomic file writes throughout, summed test time on a 32-worker NVMe machine fell from 5236 s to 1426 s, and the GitHub Actions test step fell from about 16 to 12-15 minutes.
+To measure your own suite, compare a plain `pytest` run with `pytest -o shm_min_free_gib=inf`, which keeps the plugin off.
 
 No durability test can observe the difference.
 Such tests simulate a crashed process, and a crashed process never needed its writes to leave the page cache.
@@ -105,9 +109,14 @@ Override it for one run with `-o shm_min_free_gib=8`.
 ## Caveats
 
 - **Only output during the session is contained.** Temporary files created before the session starts (while the initial `conftest.py` files are imported, in `pytest_configure`, or in other plugins' `pytest_sessionstart` hooks) or after it ends (`pytest_terminal_summary`, `pytest_unconfigure`) land directly in `/dev/shm` and stay there until reboot. Create them in fixtures, or remove them yourself.
-- **Caches under the temp root become per-session.** Libraries that cache downloads under `tempfile.gettempdir()` see the contained directory, which the plugin frees after the session. Pin such caches in your root `conftest.py`, where `tempfile.gettempdir()` is still `/dev/shm`. For tiktoken:
+- **Caches under the temp root become per-session.** A library that caches downloads under `tempfile.gettempdir()` sees the contained directory, which the plugin frees after the session, so it downloads again every session. If your suite uses such a library, point its cache at a stable directory in your root `conftest.py`, where `tempfile.gettempdir()` is still `/dev/shm`. Which environment variable to set depends on the library. For example, [tiktoken](https://github.com/openai/tiktoken) reads `TIKTOKEN_CACHE_DIR`, falling back to `DATA_GYM_CACHE_DIR`:
 
   ```python
+  # conftest.py at the repository root (tiktoken shown as an example)
+  import os
+  import tempfile
+  from pathlib import Path
+
   if "TIKTOKEN_CACHE_DIR" not in os.environ and "DATA_GYM_CACHE_DIR" not in os.environ:
       os.environ["TIKTOKEN_CACHE_DIR"] = str(Path(tempfile.gettempdir()) / "data-gym-cache")
   ```
