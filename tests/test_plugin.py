@@ -133,3 +133,84 @@ def test_stays_off_outside_linux(pytester: pytest.Pytester) -> None:
     result = run_pytest(pytester)
     result.assert_outcomes(passed=1)
     result.stdout.fnmatch_lines(["shm: off, not Linux"])
+
+
+@needs_shm
+def test_bare_tempfile_output_lands_in_the_base_directory(
+    pytester: pytest.Pytester, temproot: Path
+) -> None:
+    pytester.makepyfile(
+        """
+        import os
+        import tempfile
+        from pathlib import Path
+
+        def test_contained(tmp_path_factory):
+            contained = tmp_path_factory.getbasetemp() / "tmp"
+            assert tempfile.gettempdir() == os.environ["TMPDIR"] == str(contained)
+            assert Path(tempfile.mkdtemp()).parent == contained
+        """
+    )
+    run_pytest(pytester).assert_outcomes(passed=1)
+
+
+@needs_shm
+@pytest.mark.parametrize(
+    ("statement", "outcome"),
+    [("pass", "passed"), ("assert False", "failed")],
+    ids=["passing", "failing"],
+)
+def test_only_a_failing_session_keeps_its_base_directory(
+    pytester: pytest.Pytester, temproot: Path, statement: str, outcome: str
+) -> None:
+    pytester.makepyfile(
+        f"""
+        import tempfile
+        from pathlib import Path
+
+        def test_write(tmp_path):
+            (tmp_path / "state").write_text("x")
+            Path(tempfile.mkdtemp(), "state").write_text("x")
+            {statement}
+        """
+    )
+    run_pytest(pytester).assert_outcomes(**{outcome: 1})
+    numbered = list(temproot.glob("pytest-of-*/pytest-[0-9]*"))
+    if outcome == "passed":
+        assert numbered == []
+    else:
+        (basetemp,) = numbered
+        assert list(basetemp.glob("tmp/tmp*/state"))
+
+
+@needs_shm
+@pytest.mark.parametrize("workers", [(), ("-n", "2")], ids=["serial", "xdist"])
+def test_explicit_basetemp_survives_a_passing_session(
+    pytester: pytest.Pytester, temproot: Path, workers: tuple[str, ...]
+) -> None:
+    pytester.makepyfile("def test_write(tmp_path):\n    (tmp_path / 'kept').write_text('x')\n")
+    basetemp = temproot / "chosen"
+    run_pytest(pytester, f"--basetemp={basetemp}", *workers).assert_outcomes(passed=1)
+    assert list(basetemp.rglob("kept"))
+
+
+@needs_shm
+def test_xdist_keeps_only_the_failing_workers_directory(
+    pytester: pytest.Pytester, temproot: Path
+) -> None:
+    pytester.makepyfile(
+        """
+        import os
+
+        def test_fails_on_gw1():
+            assert os.environ["PYTEST_XDIST_WORKER"] != "gw1"
+        """
+    )
+    run_pytest(pytester, "-n", "2", "--dist", "each").assert_outcomes(passed=1, failed=1)
+    (basetemp,) = temproot.glob("pytest-of-*/pytest-[0-9]*")
+    assert [path.name for path in basetemp.iterdir()] == ["popen-gw1"]
+
+
+def test_loads_without_xdist(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile("def test_pass():\n    pass\n")
+    run_pytest(pytester, "-p", "no:xdist").assert_outcomes(passed=1)

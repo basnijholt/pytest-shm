@@ -71,6 +71,7 @@ line-length = 100
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
+    "CPY001",  # no copyright headers; LICENSE covers the project
     "D203",    # incompatible with D211
     "D213",    # incompatible with D212
     "E501",    # formatter handles line length
@@ -79,7 +80,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S108", "PLR2004"]  # relaxed for tests
+"tests/*" = ["S101", "S108", "PLR2004", "D103", "ARG001"]  # relaxed for tests
 
 [tool.mypy]
 python_version = "3.10"
@@ -87,6 +88,10 @@ strict = true
 
 [[tool.mypy.overrides]]
 module = "pytest_shm._version"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "xdist.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

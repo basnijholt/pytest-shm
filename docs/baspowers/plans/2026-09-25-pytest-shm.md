@@ -397,7 +397,9 @@ def test_too_little_free_space_leaves_the_temp_root_alone(
     pytester.makepyfile(_TEMP_ROOT_IS_NOT_SHM)
     result = run_pytest(pytester, "-o", "shm_min_free_gib=1e9")
     result.assert_outcomes(passed=1)
-    result.stdout.fnmatch_lines(["shm: off, /dev/shm has * GiB free, below shm_min_free_gib = 1e+09"])
+    result.stdout.fnmatch_lines(
+        ["shm: off, /dev/shm has * GiB free, below shm_min_free_gib = 1e+09"]
+    )
 
 
 @needs_shm
