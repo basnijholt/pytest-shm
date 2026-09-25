@@ -11,7 +11,7 @@
 ```
 src/pytest_shm/
 ├── __init__.py   # Version only
-├── plugin.py     # All hooks, the containment fixture, and off_reason()
+├── plugin.py     # All hooks and off_reason()
 └── py.typed
 ```
 
@@ -20,11 +20,11 @@ The plugin is registered through the `pytest11` entry point `shm = "pytest_shm.p
 ## Key Design Decisions
 
 1. **Switch before conftests**: `pytest_load_initial_conftests` runs `tryfirst`, before pytest imports any `conftest.py`, so conftests and the modules they import already see `/dev/shm` as the temp root.
-2. **Exported temp roots win**: an exported `TMPDIR`, `TEMP`, or `TMP` means the user chose a temp root; the plugin never overrides it.
-3. **Containment follows the temp root, not the switch**: the session fixture acts whenever `tempfile.gettempdir()` is `/dev/shm`, because xdist workers inherit the controller's `TMPDIR` and never switch themselves.
-4. **Per-worker cleanup**: each process deletes the base directory pytest chose for it after a passing session. xdist gives every worker `--basetemp`, so the controller passes `shm_owns_basetemp` through `workerinput` to say whether the caller chose one.
+2. **Off whenever files could not end up in memory**: an exported `TMPDIR`, `TEMP`, or `TMP` means the user chose a temp root, a `--basetemp` or `PYTEST_DEBUG_TEMPROOT` outside `/dev/shm` keeps pytest's base directory on disk, and `-p no:tmpdir` leaves nothing to contain files in.
+3. **Containment starts at session start and follows the temp root, not the switch**: a `pytest_sessionstart` wrapper acts after xdist has spawned its workers, so they inherit `/dev/shm` rather than the controller's directory, and it acts whenever `tempfile.gettempdir()` is `/dev/shm`, because workers never switch themselves.
+4. **Per-process cleanup**: each process deletes the base directory pytest chose for it after a passing session. xdist gives every worker `--basetemp`, so the controller passes `shm_owns_basetemp` through `workerinput` to say whether the caller chose one.
 5. **No per-test deletion**: pytest reuses freed numbered directory names, and path-keyed caches then leak state between tests.
-6. **Restore on unconfigure**: in-process sessions (`pytest.main()`, `pytester.runpytest_inprocess()`) get their original environment back.
+6. **Restore through `config.add_cleanup`**: in-process sessions (`pytest.main()`, `pytester.runpytest_inprocess()`) get their original environment back, even after a usage error.
 
 ## Development Commands
 

@@ -22,9 +22,11 @@ needs_shm = pytest.mark.skipif(_SHM_OFF is not None, reason=f"{SHM} is unusable:
 
 _TEMP_ROOT_IS_NOT_SHM = """
 import tempfile
+from pathlib import Path
 
 def test_temp_root():
-    assert not tempfile.gettempdir().startswith("/dev/shm")
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    assert not temp_root.is_relative_to(Path("/dev/shm").resolve())
 """
 
 
@@ -42,6 +44,14 @@ def temproot(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> Iter
     shutil.rmtree(root)
 
 
+@pytest.fixture
+def disk_dir() -> Iterator[Path]:
+    """Give a directory outside /dev/shm."""
+    path = Path(tempfile.mkdtemp(dir="/var/tmp", prefix="pytest-shm-test-"))
+    yield path
+    shutil.rmtree(path)
+
+
 def run_pytest(pytester: pytest.Pytester, *args: str) -> pytest.RunResult:
     """Run pytest in a subprocess without the `--basetemp` that `runpytest_subprocess` forces."""
     return pytester.run(sys.executable, "-m", "pytest", "-p", "no:cacheprovider", *args, timeout=60)
@@ -52,20 +62,35 @@ def test_plugin_is_registered(pytestconfig: pytest.Config) -> None:
 
 
 @needs_shm
-def test_moves_the_temp_root_to_shm(pytester: pytest.Pytester, temproot: Path) -> None:
+def test_moves_the_temp_root_to_shm_before_conftests_load(
+    pytester: pytest.Pytester, temproot: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Let pytest derive its base directory from the switched TMPDIR, as it does for users.
+    monkeypatch.delenv("PYTEST_DEBUG_TEMPROOT")
+    pytester.makeconftest(
+        """
+        import tempfile
+
+        IMPORT_TIME_TEMP_ROOT = tempfile.gettempdir()
+
+        def pytest_report_header():
+            return f"conftest saw {IMPORT_TIME_TEMP_ROOT}"
+        """
+    )
     pytester.makepyfile(
         """
         import tempfile
         from pathlib import Path
 
-        def test_temp_root(tmp_path):
-            assert Path(tempfile.gettempdir()).is_relative_to("/dev/shm")
-            assert tmp_path.is_relative_to(Path("/dev/shm").resolve())
+        def test_temp_root(tmp_path_factory):
+            shm = Path("/dev/shm").resolve()
+            assert Path(tempfile.gettempdir()).is_relative_to(shm)
+            assert tmp_path_factory.getbasetemp().is_relative_to(shm)
         """
     )
     result = run_pytest(pytester)
     result.assert_outcomes(passed=1)
-    result.stdout.fnmatch_lines(["shm: temp root /dev/shm"])
+    result.stdout.fnmatch_lines(["shm: temp root /dev/shm", "conftest saw /dev/shm"])
 
 
 @needs_shm
@@ -85,6 +110,27 @@ def test_exported_temp_root_wins(
     result = run_pytest(pytester)
     result.assert_outcomes(passed=1)
     result.stdout.fnmatch_lines(["shm: off, TMPDIR is exported"])
+
+
+@needs_shm
+def test_base_directory_chosen_outside_shm_leaves_the_temp_root_alone(
+    pytester: pytest.Pytester, temproot: Path, disk_dir: Path
+) -> None:
+    pytester.makepyfile(_TEMP_ROOT_IS_NOT_SHM)
+    result = run_pytest(pytester, f"--basetemp={disk_dir / 'basetemp'}")
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(["shm: off, --basetemp is outside /dev/shm"])
+
+
+@needs_shm
+def test_debug_temp_root_outside_shm_leaves_the_temp_root_alone(
+    pytester: pytest.Pytester, temproot: Path, disk_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(disk_dir))
+    pytester.makepyfile(_TEMP_ROOT_IS_NOT_SHM)
+    result = run_pytest(pytester)
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(["shm: off, PYTEST_DEBUG_TEMPROOT is outside /dev/shm"])
 
 
 @needs_shm
@@ -123,15 +169,61 @@ def test_disabled_plugin_leaves_the_temp_root_alone(
     result.stdout.no_fnmatch_line("shm:*")
 
 
+def test_disabled_tmpdir_plugin_leaves_sessions_working(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile("def test_pass():\n    pass\n")
+    result = run_pytest(pytester, "-p", "no:tmpdir")
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(["shm: off, *"])
+
+
 @needs_shm
-def test_in_process_session_restores_the_environment(
+def test_disabled_tmpdir_plugin_turns_the_plugin_off(
+    pytester: pytest.Pytester, temproot: Path
+) -> None:
+    pytester.makepyfile(_TEMP_ROOT_IS_NOT_SHM)
+    result = run_pytest(pytester, "-p", "no:tmpdir")
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(["shm: off, pytest's tmpdir plugin is disabled"])
+
+
+@needs_shm
+def test_in_process_session_restores_the_callers_environment(
+    pytester: pytest.Pytester, temproot: Path, monkeypatch: pytest.MonkeyPatch, disk_dir: Path
+) -> None:
+    monkeypatch.setattr(tempfile, "tempdir", str(disk_dir))
+    pytester.makepyfile("def test_pass():\n    pass\n")
+    pytester.runpytest_inprocess().assert_outcomes(passed=1)
+    assert "TMPDIR" not in os.environ
+    assert tempfile.tempdir == str(disk_dir)
+
+
+@needs_shm
+def test_in_process_usage_error_restores_the_environment(
     pytester: pytest.Pytester, temproot: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tempfile, "tempdir", None)
-    pytester.makepyfile("def test_pass():\n    pass\n")
-    result = pytester.runpytest_inprocess()
-    result.assert_outcomes(passed=1)
+    result = pytester.runpytest_inprocess("--no-such-flag")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
     assert "TMPDIR" not in os.environ
+    assert not Path(tempfile.gettempdir()).is_relative_to(SHM)
+
+
+@needs_shm
+def test_in_process_session_hands_back_an_exported_shm_temp_root(
+    pytester: pytest.Pytester, temproot: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TMPDIR", str(SHM))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    pytester.makepyfile(
+        """
+        import tempfile
+
+        def test_contained():
+            assert tempfile.gettempdir() != "/dev/shm"
+        """
+    )
+    pytester.runpytest_inprocess().assert_outcomes(passed=1)
+    assert os.environ["TMPDIR"] == str(SHM)
     assert tempfile.tempdir is None
 
 
@@ -150,7 +242,7 @@ def test_stays_off_outside_linux(pytester: pytest.Pytester) -> None:
 
 
 @needs_shm
-def test_bare_tempfile_output_lands_in_the_base_directory(
+def test_bare_tempfile_output_lands_in_the_base_directory_from_collection_on(
     pytester: pytest.Pytester, temproot: Path
 ) -> None:
     pytester.makepyfile(
@@ -159,8 +251,11 @@ def test_bare_tempfile_output_lands_in_the_base_directory(
         import tempfile
         from pathlib import Path
 
+        COLLECTION_TIME_DIRECTORY = Path(tempfile.mkdtemp())
+
         def test_contained(tmp_path_factory):
-            contained = tmp_path_factory.getbasetemp() / "tmp"
+            contained = tmp_path_factory.getbasetemp() / "shm-tmp"
+            assert COLLECTION_TIME_DIRECTORY.parent == contained
             assert tempfile.gettempdir() == os.environ["TMPDIR"] == str(contained)
             assert Path(tempfile.mkdtemp()).parent == contained
         """
@@ -194,7 +289,7 @@ def test_only_a_failing_session_keeps_its_base_directory(
         assert numbered == []
     else:
         (basetemp,) = numbered
-        assert list(basetemp.glob("tmp/tmp*/state"))
+        assert list(basetemp.glob("shm-tmp/tmp*/state"))
 
 
 @needs_shm
@@ -206,6 +301,27 @@ def test_explicit_basetemp_survives_a_passing_session(
     basetemp = temproot / "chosen"
     run_pytest(pytester, f"--basetemp={basetemp}", *workers).assert_outcomes(passed=1)
     assert list(basetemp.rglob("kept"))
+
+
+@needs_shm
+def test_base_directory_outside_shm_survives_a_passing_session(
+    pytester: pytest.Pytester, temproot: Path, disk_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An exported TMPDIR=/dev/shm still gets containment, wherever the base directory is.
+    monkeypatch.setenv("TMPDIR", str(SHM))
+    monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(disk_dir))
+    pytester.makepyfile("def test_write(tmp_path):\n    (tmp_path / 'kept').write_text('x')\n")
+    run_pytest(pytester).assert_outcomes(passed=1)
+    assert list(disk_dir.glob("pytest-of-*/pytest-[0-9]*/test_write0/kept"))
+
+
+@needs_shm
+def test_passing_xdist_session_leaves_nothing_behind(
+    pytester: pytest.Pytester, temproot: Path
+) -> None:
+    pytester.makepyfile("def test_write(tmp_path):\n    (tmp_path / 'state').write_text('x')\n")
+    run_pytest(pytester, "-n", "2", "--dist", "each").assert_outcomes(passed=2)
+    assert list(temproot.glob("pytest-of-*/pytest-[0-9]*")) == []
 
 
 @needs_shm
@@ -222,7 +338,7 @@ def test_xdist_keeps_only_the_failing_workers_directory(
     )
     run_pytest(pytester, "-n", "2", "--dist", "each").assert_outcomes(passed=1, failed=1)
     (basetemp,) = temproot.glob("pytest-of-*/pytest-[0-9]*")
-    assert [path.name for path in basetemp.iterdir()] == ["popen-gw1"]
+    assert sorted(path.name for path in basetemp.iterdir()) == ["popen-gw1", "shm-tmp"]
 
 
 def test_loads_without_xdist(pytester: pytest.Pytester) -> None:
