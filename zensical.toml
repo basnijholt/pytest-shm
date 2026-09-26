@@ -22,7 +22,8 @@ nav = [
 
 [project.theme]
 language = "en"
-favicon = "logo.svg"
+logo = "assets/logo-mark.svg"
+favicon = "assets/logo-mark.svg"
 
 features = [
     "announce.dismiss",
@@ -71,7 +72,6 @@ text = "Inter"
 code = "JetBrains Mono"
 
 [project.theme.icon]
-logo = "lucide/memory-stick"
 repo = "fontawesome/brands/github"
 
 [project.extra]
