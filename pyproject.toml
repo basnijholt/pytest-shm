@@ -44,7 +44,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/basnijholt/pytest-shm"
 Repository = "https://github.com/basnijholt/pytest-shm"
-Documentation = "https://github.com/basnijholt/pytest-shm#readme"
+Documentation = "https://pytest-shm.nijho.lt"
 Issues = "https://github.com/basnijholt/pytest-shm/issues"
 Changelog = "https://github.com/basnijholt/pytest-shm/releases"
 
@@ -116,4 +116,8 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.0",
     "ty>=0.0.1a13",
+]
+docs = [
+    "markdown-gfm-admonition",
+    "zensical",
 ]

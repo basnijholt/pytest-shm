@@ -17,6 +17,10 @@ src/pytest_shm/
 
 The plugin is registered through the `pytest11` entry point `shm = "pytest_shm.plugin"`, so `-p no:shm` disables it.
 
+`docs/` is the Zensical site published to https://pytest-shm.nijho.lt by `.github/workflows/docs.yml`; every file in it is public, and Zensical has no exclude option.
+Keep design specs and implementation plans in `design/specs/` and `design/plans/` instead.
+When behavior or options change, update both `README.md` and the matching page in `docs/`.
+
 ## Key Design Decisions
 
 1. **Switch before conftests**: `pytest_load_initial_conftests` runs `tryfirst`, before pytest imports any `conftest.py`, so conftests and the modules they import already see `/dev/shm` as the temp root.
@@ -35,6 +39,7 @@ Use `just` for common tasks. Run `just` to list available commands:
 | `just install` | Install dev dependencies |
 | `just test` | Run all tests (parallel) |
 | `just lint` | Lint, format, and type check |
+| `just docs` | Serve the documentation site locally |
 | `just clean` | Clean build artifacts |
 
 ## Testing

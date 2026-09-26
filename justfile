@@ -20,7 +20,11 @@ lint:
     uv run mypy src tests
     uv run ty check
 
+# Serve the documentation site locally
+docs:
+    uv run --group docs zensical serve
+
 # Clean up build artifacts and caches
 clean:
-    rm -rf .pytest_cache .mypy_cache .ruff_cache dist build
+    rm -rf .pytest_cache .mypy_cache .ruff_cache dist build site
     find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
