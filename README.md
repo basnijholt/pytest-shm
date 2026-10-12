@@ -109,7 +109,7 @@ The plugin leaves the temp root alone, and says why in the report header, when a
 | Condition | Header |
 | --- | --- |
 | Not running on Linux | `shm: off, not Linux` |
-| `TMPDIR`, `TEMP`, or `TMP` is exported | `shm: off, TMPDIR is exported` |
+| `TMPDIR`, `TEMP`, or `TMP` is exported | `shm: off, TMPDIR is exported`, naming the first one set |
 | `--basetemp` or `PYTEST_DEBUG_TEMPROOT` puts pytest's base directory outside `/dev/shm` | `shm: off, --basetemp is outside /dev/shm` |
 | pytest's `tmpdir` plugin is disabled (`-p no:tmpdir`) | `shm: off, pytest's tmpdir plugin is disabled` |
 | `/dev/shm` is missing, or not writable and searchable | `shm: off, /dev/shm is missing or not writable` |
