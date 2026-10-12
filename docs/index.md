@@ -35,7 +35,7 @@ Files there can be created, written, read, and deleted like any other file, but 
 pytest-shm moves pytest's temporary files into `/dev/shm`.
 That covers `tmp_path`, `tmp_path_factory`, and every file or folder your code creates with Python's `tempfile` module.
 Because those files take up memory, the plugin also cleans up what the test session created after a passing run, and keeps it after a failing run so you can inspect it.
-The [caveats](caveats.md) cover the files it cannot clean up.
+[How it works](how-it-works.md) and the [caveats](caveats.md) list what it leaves behind.
 
 ## Does it help?
 
