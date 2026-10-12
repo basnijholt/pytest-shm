@@ -51,7 +51,7 @@ The name is short for *shared memory*, because programs use it to share data thr
 Files there can be created, written, read, and deleted like any other file, but `fsync` has no disk to wait for, so it returns immediately.
 
 pytest-shm moves pytest's temporary files into `/dev/shm`.
-That covers `tmp_path`, `tmp_path_factory`, and every file or folder your code creates with Python's `tempfile` module.
+That covers `tmp_path`, `tmp_path_factory`, and anything Python's `tempfile` module creates in its default location.
 Because those files take up memory, the plugin also cleans up what the test session created after a passing run, and keeps it after a failing run so you can inspect it.
 [How it works](#how-it-works) and the [caveats](#caveats) list what it leaves behind.
 
