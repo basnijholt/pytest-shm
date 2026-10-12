@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/pytest-shm)](https://pypi.org/project/pytest-shm/)
 [![Python](https://img.shields.io/pypi/pyversions/pytest-shm)](https://pypi.org/project/pytest-shm/)
 [![Docs](https://img.shields.io/badge/docs-pytest--shm.nijho.lt-blue)](https://pytest-shm.nijho.lt)
-[![License](https://img.shields.io/github/license/basnijholt/pytest-shm)](LICENSE)
+[![License](https://img.shields.io/github/license/basnijholt/pytest-shm)](https://github.com/basnijholt/pytest-shm/blob/main/LICENSE)
 [![CI](https://github.com/basnijholt/pytest-shm/actions/workflows/ci.yml/badge.svg)](https://github.com/basnijholt/pytest-shm/actions/workflows/ci.yml)
 
 <img src="https://raw.githubusercontent.com/basnijholt/pytest-shm/main/docs/logo.svg" alt="pytest-shm logo" align="right" width="200" />
