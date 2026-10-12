@@ -38,17 +38,17 @@ The operating system first keeps written data in memory and copies it to the dis
 To be sure, the program asks the operating system to push the data all the way to the disk and waits until the disk confirms.
 That request is called `fsync`.
 
-Databases like SQLite do this on every commit, and so does any code that replaces a file safely ("atomic writes").
+SQLite does this on every commit by default, and careful code that replaces a file safely ("atomic writes") does it too.
 Each `fsync` takes from a fraction of a millisecond to many milliseconds, depending on the disk.
 In production that wait is the price of not losing data.
-In tests it buys nothing, because the files are thrown away when the test ends.
+In tests it buys nothing, because nobody needs a test's files to survive a power cut.
 A suite that saves data thousands of times can spend most of its time just waiting on the disk.
 
 ## The fix: a folder that lives in memory
 
 Linux has a folder, `/dev/shm`, that looks like any other folder but keeps its files in RAM.
 The name is short for *shared memory*, because programs use it to share data through memory, and the kind of filesystem behind it is called *tmpfs*.
-Files there can be created, written, read, and deleted like any other file, but there is no disk behind them, so `fsync` returns immediately.
+Files there can be created, written, read, and deleted like any other file, but `fsync` has no disk to wait for, so it returns immediately.
 
 pytest-shm moves pytest's temporary files into `/dev/shm`.
 That covers `tmp_path`, `tmp_path_factory`, and every file or folder your code creates with Python's `tempfile` module.
@@ -79,7 +79,7 @@ pip install pytest-shm
 ```
 
 It needs Python 3.10+ and pytest 8.4+, and pytest loads it automatically.
-It only acts on Linux, and only when `/dev/shm` is safe to use; elsewhere, and whenever you export `TMPDIR`, it leaves your temporary files where they are, so it is safe to add to cross-platform projects.
+It only acts on Linux, and only when `/dev/shm` is safe to use; elsewhere, and whenever you export `TMPDIR` to a folder other than `/dev/shm`, it leaves your temporary files where they are, so it is safe to add to cross-platform projects.
 The report header at the top of each run tells you whether it is active:
 
 ```text
