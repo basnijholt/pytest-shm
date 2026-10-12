@@ -11,7 +11,7 @@
 **Faster tests for code that saves files, by keeping pytest's temporary files in memory instead of on disk.**
 
 Install it and run pytest as usual.
-There is nothing to configure, and your tests do not change.
+There is nothing to configure, and most test suites need no changes.
 
 ## Table of Contents
 
@@ -46,13 +46,14 @@ A suite that saves data thousands of times can spend most of its time just waiti
 
 ## The fix: a folder that lives in memory
 
-Linux has a folder, `/dev/shm`, that looks like any other folder but keeps its files in RAM.
+Linux has a folder, `/dev/shm`, that looks like any other folder but keeps its files in memory.
 The name is short for *shared memory*, because programs use it to share data through memory, and the kind of filesystem behind it is called *tmpfs*.
 Files there can be created, written, read, and deleted like any other file, but `fsync` has no disk to wait for, so it returns immediately.
 
 pytest-shm moves pytest's temporary files into `/dev/shm`.
 That covers `tmp_path`, `tmp_path_factory`, and every file or folder your code creates with Python's `tempfile` module.
-Because those files take up memory, the plugin also cleans them up after a passing run, and keeps them after a failing run so you can inspect them.
+Because those files take up memory, the plugin also cleans up what the test session created after a passing run, and keeps it after a failing run so you can inspect it.
+The [caveats](#caveats) cover the files it cannot clean up.
 
 ## Does it help?
 
