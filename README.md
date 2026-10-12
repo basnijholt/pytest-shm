@@ -3,24 +3,24 @@
 [![PyPI](https://img.shields.io/pypi/v/pytest-shm)](https://pypi.org/project/pytest-shm/)
 [![Python](https://img.shields.io/pypi/pyversions/pytest-shm)](https://pypi.org/project/pytest-shm/)
 [![Docs](https://img.shields.io/badge/docs-pytest--shm.nijho.lt-blue)](https://pytest-shm.nijho.lt)
-[![License](https://img.shields.io/github/license/basnijholt/pytest-shm)](LICENSE)
+[![License](https://img.shields.io/github/license/basnijholt/pytest-shm)](https://github.com/basnijholt/pytest-shm/blob/main/LICENSE)
 [![CI](https://github.com/basnijholt/pytest-shm/actions/workflows/ci.yml/badge.svg)](https://github.com/basnijholt/pytest-shm/actions/workflows/ci.yml)
 
 <img src="https://raw.githubusercontent.com/basnijholt/pytest-shm/main/docs/logo.svg" alt="pytest-shm logo" align="right" width="200" />
 
-A pytest plugin that puts your test suite's temporary files on the `/dev/shm` tmpfs, so tests that fsync stop waiting on the disk.
+**Faster tests for code that saves files, by keeping pytest's temporary files in memory instead of on disk.**
 
-> [!NOTE]
-> Install it and run pytest.
-> On Linux it moves the temp root to `/dev/shm` when that is safe, keeps stray `tempfile` output from collection on inside pytest's base directory, and frees that directory when the session passes.
-> Everywhere else, and whenever you export `TMPDIR`, it leaves the temp root alone.
+Install it and run pytest as usual.
+There is nothing to configure, and most test suites need no changes.
 
 ## Table of Contents
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Why](#why)
+- [The problem: waiting on the disk](#the-problem-waiting-on-the-disk)
+- [The fix: a folder that lives in memory](#the-fix-a-folder-that-lives-in-memory)
+- [Does it help?](#does-it-help)
 - [Installation](#installation)
 - [How it works](#how-it-works)
 - [When it stays off](#when-it-stays-off)
@@ -31,19 +31,45 @@ A pytest plugin that puts your test suite's temporary files on the `/dev/shm` tm
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-## Why
+## The problem: waiting on the disk
 
-SQLite commits, atomic file replacement, and anything else that promises durability call `fsync`, and on a real disk each call waits for the device.
-A suite that exercises durable storage can spend most of its time there.
-tmpfs lives in memory, so `fsync` returns immediately.
+When a program saves something it cannot afford to lose, writing the file is not enough.
+The operating system first keeps written data in memory and copies it to the disk a little later, so a power cut could still lose it.
+To be sure, the program asks the operating system to push the data all the way to the disk and waits until the disk confirms.
+That request is called `fsync`.
 
-How much that saves depends on how much of your suite waits on `fsync`.
-As one data point, in [MindRoom](https://github.com/mindroom-ai/mindroom)'s suite of about 26,000 tests, which commit SQLite transactions and atomic file writes throughout, summed test time on a 32-worker NVMe machine fell from 5236 s to 1426 s, and the GitHub Actions test step fell from about 16 to 12-15 minutes.
+SQLite does this on every commit by default, and careful code that replaces a file safely ("atomic writes") does it too.
+Each `fsync` takes from a fraction of a millisecond to many milliseconds, depending on the disk.
+In production that wait is the price of not losing data.
+In tests it buys nothing, because nobody needs a test's files to survive a power cut.
+A suite that saves data thousands of times can spend most of its time just waiting on the disk.
+
+## The fix: a folder that lives in memory
+
+Linux has a folder, `/dev/shm`, that looks like any other folder but keeps its files in memory.
+The name is short for *shared memory*, because programs use it to share data through memory, and the kind of filesystem behind it is called *tmpfs*.
+Files there can be created, written, read, and deleted like any other file, but `fsync` has no disk to wait for, so it returns immediately.
+
+pytest-shm moves pytest's temporary files into `/dev/shm`.
+That covers `tmp_path`, `tmp_path_factory`, and anything Python's `tempfile` module creates in its default location.
+Because those files take up memory, the plugin also cleans up what the test session created after a passing run, and keeps it after a failing run so you can inspect it.
+[How it works](#how-it-works) and the [caveats](#caveats) list what it leaves behind.
+
+## Does it help?
+
+That depends on how much of your suite waits on `fsync`.
+As one data point, [MindRoom](https://github.com/mindroom-ai/mindroom) has about 26,000 tests that commit SQLite transactions and write files atomically throughout:
+
+| Measurement | Without pytest-shm | With pytest-shm |
+| --- | --- | --- |
+| Summed test time, 32 workers on an NVMe disk | 5236 s | 1426 s |
+| GitHub Actions test step | about 16 min | 12-15 min |
+
 To measure your own suite, compare a plain `pytest` run with `pytest -o shm_min_free_gib=inf`, which keeps the plugin off.
 
-No durability test can observe the difference.
-Such tests simulate a crashed process, and a crashed process never needed its writes to leave the page cache.
-The [caveats](#caveats) list the differences other tests can see.
+Tests that check your code survives a crash still mean the same thing.
+They simulate the program crashing, not the machine losing power, and data a crashed program already handed to the operating system is safe whether or not it reached the disk.
+The [caveats](#caveats) list the few differences other tests can notice.
 
 ## Installation
 
@@ -54,7 +80,8 @@ pip install pytest-shm
 ```
 
 It needs Python 3.10+ and pytest 8.4+, and pytest loads it automatically.
-The report header tells you whether it is active:
+It only acts on Linux, and only when `/dev/shm` is safe to use; elsewhere, and whenever you export `TMPDIR` to a folder other than `/dev/shm`, it leaves your temporary files where they are, so it is safe to add to cross-platform projects.
+The report header at the top of each run tells you whether it is active:
 
 ```text
 shm: temp root /dev/shm
