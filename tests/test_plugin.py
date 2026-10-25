@@ -57,8 +57,15 @@ def run_pytest(pytester: pytest.Pytester, *args: str) -> pytest.RunResult:
     return pytester.run(sys.executable, "-m", "pytest", "-p", "no:cacheprovider", *args, timeout=60)
 
 
+# From 9.1, pytest removes a session's lock before pytest-shm cleans up, so the plugin can
+# remove the emptied base directory too; before 9.1 the directory stays for retention to prune.
+_BASE_DIRECTORY_IS_REMOVED = tuple(map(int, pytest.__version__.split(".")[:2])) >= (9, 1)
+
+
 def leftovers(temproot: Path) -> list[Path]:
-    """List what sessions left in their base directories, which pytest prunes once empty."""
+    """List what sessions left of their base directories."""
+    if _BASE_DIRECTORY_IS_REMOVED:
+        return list(temproot.glob("pytest-of-*/pytest-[0-9]*"))
     return list(temproot.glob("pytest-of-*/pytest-[0-9]*/*"))
 
 
@@ -319,7 +326,9 @@ def test_session_starting_while_a_passing_one_exits_keeps_its_lock(
 
         def wait_for(path):
             deadline = time.monotonic() + 30
-            while not path.exists() and time.monotonic() < deadline:
+            while not path.exists():
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"{path} never appeared")
                 time.sleep(0.01)
 
         def start_next_session():
@@ -359,6 +368,25 @@ def test_session_starting_while_a_passing_one_exits_keeps_its_lock(
     )
     run_pytest(pytester).assert_outcomes(passed=1)
     assert (pytester.path / "records" / "lock").read_text() == "True"
+
+
+@needs_shm
+def test_cleanup_that_cannot_delete_everything_leaves_a_passing_session_passing(
+    pytester: pytest.Pytester, temproot: Path
+) -> None:
+    pytester.makepyfile(
+        """
+        def test_lock_down(tmp_path_factory):
+            basetemp = tmp_path_factory.getbasetemp()
+            (basetemp / "state").write_text("x")
+            basetemp.chmod(0o500)
+        """
+    )
+    result = run_pytest(pytester)
+    for basetemp in temproot.glob("pytest-of-*/pytest-[0-9]*"):
+        basetemp.chmod(0o700)
+    result.assert_outcomes(passed=1)
+    assert result.ret == 0
 
 
 @needs_shm

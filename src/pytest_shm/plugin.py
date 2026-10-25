@@ -194,15 +194,22 @@ def _empty(basetemp: Path) -> None:
     directory now would free its number for a session starting before this process exits,
     whose lock that handler would then remove, leaving its live directory to another
     session's retention cleanup. pytest prunes the empty directory later like any other.
+
+    Like `shutil.rmtree(ignore_errors=True)`, this is best effort: what a test left
+    undeletable stays, and the session's outcome does not change.
     """
-    with contextlib.suppress(FileNotFoundError):
-        for entry in basetemp.iterdir():
-            if entry.name == _PYTEST_LOCK_NAME:
-                continue
+    try:
+        entries = list(basetemp.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name == _PYTEST_LOCK_NAME:
+            continue
+        with contextlib.suppress(OSError):
             if entry.is_dir() and not entry.is_symlink():
                 shutil.rmtree(entry, ignore_errors=True)
             else:
-                entry.unlink(missing_ok=True)
+                entry.unlink()
     # Succeeds once no lock is left: an xdist worker's directory is never locked, and from
     # 9.1 pytest removes the session's lock in its own pytest_sessionfinish, before this one.
     with contextlib.suppress(OSError):
