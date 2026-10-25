@@ -37,4 +37,4 @@ if "TIKTOKEN_CACHE_DIR" not in os.environ and "DATA_GYM_CACHE_DIR" not in os.env
 ## Files use RAM
 
 Everything a session writes counts against memory until the session ends.
-Base directories of failing sessions stay until the machine reboots or later failing sessions push them out of pytest's retention of three numbered directories; passing sessions reuse the freed number instead of advancing it.
+Base directories of failing sessions stay until the machine reboots or later failing sessions push them out of pytest's retention of three numbered directories; a passing session leaves at most an empty directory.
