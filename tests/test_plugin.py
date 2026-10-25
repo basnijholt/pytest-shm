@@ -57,6 +57,18 @@ def run_pytest(pytester: pytest.Pytester, *args: str) -> pytest.RunResult:
     return pytester.run(sys.executable, "-m", "pytest", "-p", "no:cacheprovider", *args, timeout=60)
 
 
+# From 9.1, pytest removes a session's lock before pytest-shm cleans up, so the plugin can
+# remove the emptied base directory too; before 9.1 the directory stays for retention to prune.
+_BASE_DIRECTORY_IS_REMOVED = tuple(map(int, pytest.__version__.split(".")[:2])) >= (9, 1)
+
+
+def leftovers(temproot: Path) -> list[Path]:
+    """List what sessions left of their base directories."""
+    if _BASE_DIRECTORY_IS_REMOVED:
+        return list(temproot.glob("pytest-of-*/pytest-[0-9]*"))
+    return list(temproot.glob("pytest-of-*/pytest-[0-9]*/*"))
+
+
 def test_plugin_is_registered(pytestconfig: pytest.Config) -> None:
     assert pytestconfig.pluginmanager.has_plugin("shm")
 
@@ -284,12 +296,104 @@ def test_only_a_failing_session_keeps_its_base_directory(
         """
     )
     run_pytest(pytester).assert_outcomes(**{outcome: 1})
-    numbered = list(temproot.glob("pytest-of-*/pytest-[0-9]*"))
     if outcome == "passed":
-        assert numbered == []
+        assert leftovers(temproot) == []
     else:
-        (basetemp,) = numbered
+        (basetemp,) = temproot.glob("pytest-of-*/pytest-[0-9]*")
         assert list(basetemp.glob("shm-tmp/tmp*/state"))
+
+
+@needs_shm
+def test_session_starting_while_a_passing_one_exits_keeps_its_lock(
+    pytester: pytest.Pytester, temproot: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Before pytest 9.1, a session removes its numbered directory's lock in an exit handler.
+    # A session that took the number of one still exiting lost its lock to that handler, so
+    # a later session's retention cleanup deleted its base directory mid-run.
+    monkeypatch.setenv("RECORDS", str(pytester.mkdir("records")))
+    pytester.makeconftest(
+        """
+        import atexit
+        import os
+        import subprocess
+        import sys
+        import time
+        from pathlib import Path
+
+        RECORDS = Path(os.environ["RECORDS"])
+        FIRST = "NEXT_SESSION" not in os.environ
+        next_session = []
+
+        def wait_for(path):
+            deadline = time.monotonic() + 30
+            while not path.exists():
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"{path} never appeared")
+                time.sleep(0.01)
+
+        def start_next_session():
+            env = {**os.environ, "NEXT_SESSION": "1"}
+            command = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider"]
+            quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+            next_session.append(subprocess.Popen(command, env=env, **quiet))
+            wait_for(RECORDS / "next")
+
+        def record_whether_the_next_session_kept_its_lock():
+            basetemp = Path((RECORDS / "next").read_text())
+            (RECORDS / "lock").write_text(str((basetemp / ".lock").exists()))
+            (RECORDS / "release").touch()
+            next_session[0].wait(timeout=30)
+
+        # atexit runs handlers in reverse: this one after pytest's own, which come later.
+        if FIRST:
+            atexit.register(record_whether_the_next_session_kept_its_lock)
+
+        def pytest_sessionfinish():
+            # Registered after pytest's own exit handlers, so it runs before them.
+            if FIRST:
+                atexit.register(start_next_session)
+        """
+    )
+    pytester.makepyfile(
+        """
+        import os
+        from pathlib import Path
+
+        from conftest import RECORDS, wait_for
+
+        def test_record(tmp_path_factory):
+            if "NEXT_SESSION" in os.environ:
+                partial = RECORDS / "next.partial"
+                partial.write_text(str(tmp_path_factory.getbasetemp()))
+                partial.replace(RECORDS / "next")
+                wait_for(RECORDS / "release")
+        """
+    )
+    result = run_pytest(pytester)
+    result.assert_outcomes(passed=1)
+    assert result.ret == 0
+    assert (pytester.path / "records" / "lock").read_text() == "True"
+
+
+@needs_shm
+def test_cleanup_that_cannot_delete_everything_leaves_a_passing_session_passing(
+    pytester: pytest.Pytester, temproot: Path
+) -> None:
+    pytester.makepyfile(
+        """
+        def test_lock_down(tmp_path_factory):
+            basetemp = tmp_path_factory.getbasetemp()
+            (basetemp / "state").write_text("x")
+            basetemp.chmod(0o500)
+        """
+    )
+    try:
+        result = run_pytest(pytester)
+    finally:
+        for basetemp in temproot.glob("pytest-of-*/pytest-[0-9]*"):
+            basetemp.chmod(0o700)
+    result.assert_outcomes(passed=1)
+    assert result.ret == 0
 
 
 @needs_shm
@@ -343,7 +447,7 @@ def test_session_that_runs_no_tests_leaves_nothing_behind(
 ) -> None:
     pytester.makepyfile("def test_pass():\n    pass\n")
     assert run_pytest(pytester, *args).ret == exit_code
-    assert list(temproot.glob("pytest-of-*/pytest-[0-9]*")) == []
+    assert leftovers(temproot) == []
 
 
 @needs_shm
@@ -369,7 +473,7 @@ def test_base_directory_is_freed_after_session_fixtures_finish_with_it(
     result = run_pytest(pytester)
     assert result.ret == 0, result.stdout.str()
     result.stdout.no_fnmatch_line("*Error*")
-    assert list(temproot.glob("pytest-of-*/pytest-[0-9]*")) == []
+    assert leftovers(temproot) == []
 
 
 @needs_shm
@@ -378,7 +482,7 @@ def test_passing_xdist_session_leaves_nothing_behind(
 ) -> None:
     pytester.makepyfile("def test_write(tmp_path):\n    (tmp_path / 'state').write_text('x')\n")
     run_pytest(pytester, "-n", "2", "--dist", "each").assert_outcomes(passed=2)
-    assert list(temproot.glob("pytest-of-*/pytest-[0-9]*")) == []
+    assert leftovers(temproot) == []
 
 
 @needs_shm

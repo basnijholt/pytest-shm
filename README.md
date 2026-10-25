@@ -97,7 +97,7 @@ shm: off, TMPDIR is exported
 
 1. **Temp root.** Before any `conftest.py` is imported, the plugin sets `TMPDIR=/dev/shm`, so `tmp_path`, `tmp_path_factory`, and every `tempfile` call land in memory.
 2. **Containment.** Tests and the code they drive often call `tempfile.mkdtemp()` without removing the result. On disk that clutters `/tmp`; on tmpfs it would hold memory until reboot. When the session starts, before collection, the plugin points `TMPDIR` at `<basetemp>/shm-tmp`, so that output lives and dies with pytest's own base directory.
-3. **Cleanup.** pytest keeps the last three sessions' base directories. When a session passes, collects no tests, or stops at a usage error, the plugin deletes its base directory right away instead of holding it in memory. A failing session keeps everything for inspection.
+3. **Cleanup.** pytest keeps the last three sessions' base directories. When a session passes, collects no tests, or stops at a usage error, the plugin deletes everything in its base directory right away instead of holding it in memory, and from pytest 9.1 the emptied directory too, so its number can be reused. Before 9.1 pytest holds the directory's lock until the process exits, so the empty directory stays until pytest's retention prunes it and the next session takes a new number, as it would without the plugin. A failing session keeps everything for inspection.
 4. **pytest-xdist.** Each worker owns `<basetemp>/popen-gwN` and cleans up after itself, so a failing run keeps only the directories of workers that saw a failure. A `--basetemp` you pass yourself is never deleted, with or without xdist.
 
 Deleting per test is deliberately not offered: pytest would then reuse the freed directory names, and caches keyed by path would hand the next test the previous one's state.
@@ -151,7 +151,7 @@ Override it for one run with `-o shm_min_free_gib=8`.
 
 - **Temp files live on another filesystem.** `os.rename` or `os.replace` from a temporary file into your project fails with `EXDEV`, as it already does wherever `/tmp` is tmpfs.
 - **Paths get longer.** `/dev/shm/pytest-of-<user>/pytest-N/popen-gwN/shm-tmp/tmpXXXXXXXX` is much longer than `/tmp/tmpXXXXXXXX`, which matters for the 107-byte limit on `AF_UNIX` socket paths.
-- **Files use RAM.** Everything a session writes counts against memory until the session ends. Base directories of failing sessions stay until the machine reboots or later failing sessions push them out of pytest's retention of three numbered directories; passing sessions reuse the freed number instead of advancing it.
+- **Files use RAM.** Everything a session writes counts against memory until the session ends. Base directories of failing sessions stay until the machine reboots or later sessions push them out of pytest's retention of three numbered directories. From pytest 9.1 a passing session gives its number back, so failing directories last longer; before 9.1 every session takes a new number, as it does without the plugin.
 - **Plugin autoloading.** With `PYTEST_DISABLE_PLUGIN_AUTOLOAD` set, pass `-p shm` to load the plugin.
 
 ## Development

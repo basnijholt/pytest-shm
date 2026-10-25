@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import sys
@@ -21,6 +22,8 @@ _TEMP_ROOT_VARIABLES = ("TMPDIR", "TEMP", "TMP")
 _MIN_FREE_INI = "shm_min_free_gib"
 _CONTAINED_NAME = "shm-tmp"
 _OWNS_BASETEMP_KEY = "shm_owns_basetemp"
+# What `_pytest.pathlib.get_lock_path` names a numbered directory's lock.
+_PYTEST_LOCK_NAME = ".lock"
 _OFF_REASON = pytest.StashKey[str]()
 _CONTAINED = pytest.StashKey[bool]()
 _OWNED_BASETEMP = pytest.StashKey[Path]()
@@ -181,4 +184,33 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
         tempfile.tempdir = None
     basetemp = config.stash.get(_OWNED_BASETEMP, None)
     if basetemp is not None and exitstatus in _NOTHING_TO_INSPECT:
-        shutil.rmtree(basetemp, ignore_errors=True)
+        _empty(basetemp)
+
+
+def _empty(basetemp: Path) -> None:
+    """Delete what a base directory holds, keeping the directory while pytest's lock is in it.
+
+    Before 9.1, pytest removes a numbered directory's lock in an exit handler. Deleting the
+    directory now would free its number for a session starting before this process exits,
+    whose lock that handler would then remove, leaving its live directory to another
+    session's retention cleanup. pytest prunes the empty directory later like any other.
+
+    Like `shutil.rmtree(ignore_errors=True)`, this is best effort: what a test left
+    undeletable stays, and the session's outcome does not change.
+    """
+    try:
+        entries = list(basetemp.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name == _PYTEST_LOCK_NAME:
+            continue
+        with contextlib.suppress(OSError):
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink()
+    # Succeeds once no lock is left: an xdist worker's directory is never locked, and from
+    # 9.1 pytest removes the session's lock in its own pytest_sessionfinish, before this one.
+    with contextlib.suppress(OSError):
+        basetemp.rmdir()

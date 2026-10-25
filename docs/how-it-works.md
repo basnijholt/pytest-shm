@@ -18,7 +18,8 @@ When the session starts, before collection, the plugin points `TMPDIR` at `<base
 ## Cleanup
 
 pytest keeps the last three sessions' base directories.
-When a session passes, collects no tests, or stops at a usage error, the plugin deletes its base directory right away instead of holding it in memory.
+When a session passes, collects no tests, or stops at a usage error, the plugin deletes everything in its base directory right away instead of holding it in memory, and from pytest 9.1 the emptied directory too, so its number can be reused.
+Before 9.1 pytest holds the directory's lock until the process exits, so the empty directory stays until pytest's retention prunes it and the next session takes a new number, as it would without the plugin.
 A failing session keeps everything for inspection.
 
 Deleting per test is deliberately not offered: pytest would then reuse the freed directory names, and caches keyed by path would hand the next test the previous one's state.
