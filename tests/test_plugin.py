@@ -334,7 +334,8 @@ def test_session_starting_while_a_passing_one_exits_keeps_its_lock(
         def start_next_session():
             env = {**os.environ, "NEXT_SESSION": "1"}
             command = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider"]
-            next_session.append(subprocess.Popen(command, env=env))
+            quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+            next_session.append(subprocess.Popen(command, env=env, **quiet))
             wait_for(RECORDS / "next")
 
         def record_whether_the_next_session_kept_its_lock():
@@ -362,11 +363,15 @@ def test_session_starting_while_a_passing_one_exits_keeps_its_lock(
 
         def test_record(tmp_path_factory):
             if "NEXT_SESSION" in os.environ:
-                (RECORDS / "next").write_text(str(tmp_path_factory.getbasetemp()))
+                partial = RECORDS / "next.partial"
+                partial.write_text(str(tmp_path_factory.getbasetemp()))
+                partial.replace(RECORDS / "next")
                 wait_for(RECORDS / "release")
         """
     )
-    run_pytest(pytester).assert_outcomes(passed=1)
+    result = run_pytest(pytester)
+    result.assert_outcomes(passed=1)
+    assert result.ret == 0
     assert (pytester.path / "records" / "lock").read_text() == "True"
 
 
@@ -382,9 +387,11 @@ def test_cleanup_that_cannot_delete_everything_leaves_a_passing_session_passing(
             basetemp.chmod(0o500)
         """
     )
-    result = run_pytest(pytester)
-    for basetemp in temproot.glob("pytest-of-*/pytest-[0-9]*"):
-        basetemp.chmod(0o700)
+    try:
+        result = run_pytest(pytester)
+    finally:
+        for basetemp in temproot.glob("pytest-of-*/pytest-[0-9]*"):
+            basetemp.chmod(0o700)
     result.assert_outcomes(passed=1)
     assert result.ret == 0
 
